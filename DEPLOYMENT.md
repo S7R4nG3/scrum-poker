@@ -1,16 +1,39 @@
-# Deployment Guide - HTTPS with Let's Encrypt
+# Deployment Guide - HTTPS with Let's Encrypt (DNS-01)
 
-This guide explains how to deploy the Scrum Poker app with HTTPS using Let's Encrypt certificates.
+This guide explains how to deploy the Scrum Poker app with HTTPS using Let's Encrypt certificates via DNS-01 validation with Hostinger DNS API.
 
 ## Prerequisites
 
-1. A domain name pointing to your server's IP address (e.g., `scrum.strangeindustries.cloud`)
-2. Docker and Docker Compose installed on your server
-3. Ports 80 and 443 open in your firewall
+1. A domain name managed by Hostinger DNS (e.g., `scrum.strangeindustries.cloud`)
+2. Hostinger API key (see setup instructions below)
+3. Docker and Docker Compose installed on your server
+4. Ports 80 and 443 open in your firewall
 
 ## Initial Setup
 
-### 1. Configure Email for Certificate Notifications
+### 1. Get Hostinger API Key
+
+1. Log in to your Hostinger account
+2. Go to **API** section in your account dashboard
+3. Create a new API key with DNS management permissions
+4. Copy the API key
+
+### 2. Set Environment Variables
+
+Export your Hostinger API key as an environment variable:
+
+```bash
+export HOSTINGER_API_KEY="your_api_key_here"
+```
+
+For permanent setup, add this to your `~/.bashrc` or `~/.zshrc`:
+
+```bash
+echo 'export HOSTINGER_API_KEY="your_api_key_here"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### 3. Configure Email for Certificate Notifications
 
 Edit `init-letsencrypt.sh` and add your email address:
 
@@ -20,7 +43,7 @@ email="your-email@example.com"
 
 This email will receive notifications about certificate expiration (Let's Encrypt certificates expire every 90 days, but auto-renewal is configured).
 
-### 2. Optional: Test with Staging Environment
+### 4. Optional: Test with Staging Environment
 
 If you want to test the setup first without hitting Let's Encrypt rate limits, set:
 
@@ -30,7 +53,7 @@ staging=1
 
 Once everything works, change it back to `staging=0` and run the script again to get production certificates.
 
-### 3. Initialize Let's Encrypt Certificates
+### 5. Initialize Let's Encrypt Certificates
 
 Run the initialization script:
 
@@ -41,10 +64,13 @@ Run the initialization script:
 This script will:
 - Create necessary directories
 - Generate a dummy certificate to start nginx
-- Request a real Let's Encrypt certificate
+- Request a real Let's Encrypt certificate using DNS-01 validation
+- Install the certificate to nginx-compatible location
 - Reload nginx with the new certificate
 
-### 4. Start All Services
+**Note:** DNS-01 validation does not require port 80 to be accessible during certificate issuance, making it more flexible than HTTP-01.
+
+### 6. Start All Services
 
 After the certificates are initialized, start all services:
 
@@ -67,10 +93,11 @@ The deployment uses the following components:
 - Supports WebSocket connections for Socket.io
 - Applies security headers and rate limiting
 
-### Certbot
-- Obtains Let's Encrypt certificates
+### acme.sh
+- Obtains Let's Encrypt certificates using DNS-01 validation
 - Automatically renews certificates every 12 hours
 - Certificates are valid for 90 days
+- Uses Hostinger DNS API to create TXT records for validation
 
 ### Client & Server
 - Not exposed directly to the internet
@@ -78,12 +105,12 @@ The deployment uses the following components:
 
 ## Certificate Renewal
 
-Certificates are automatically renewed by the certbot container, which checks for renewal every 12 hours. Let's Encrypt certificates are valid for 90 days and are renewed when they have 30 days or less remaining.
+Certificates are automatically renewed by the acme.sh container, which checks for renewal every 12 hours. Let's Encrypt certificates are valid for 90 days and are renewed when they have 30 days or less remaining.
 
 To manually renew certificates:
 
 ```bash
-docker-compose run --rm certbot renew
+docker-compose run --rm -e HOSTINGER_API_KEY=$HOSTINGER_API_KEY acme --renew -d scrum.strangeindustries.cloud
 docker-compose exec nginx nginx -s reload
 ```
 
@@ -92,7 +119,7 @@ docker-compose exec nginx nginx -s reload
 Check certificate expiration date:
 
 ```bash
-docker-compose run --rm certbot certificates
+docker-compose run --rm acme --list
 ```
 
 Or use OpenSSL:
@@ -106,9 +133,19 @@ echo | openssl s_client -servername scrum.strangeindustries.cloud -connect scrum
 ### Certificate Verification Failed
 
 If you get certificate errors, check:
-1. Domain DNS points to your server IP
-2. Ports 80 and 443 are open
-3. No other services are using ports 80/443
+1. HOSTINGER_API_KEY environment variable is set correctly
+2. Your Hostinger API key has DNS management permissions
+3. Domain is managed by Hostinger DNS
+4. Ports 80 and 443 are open (for serving HTTPS, not for validation)
+5. No other services are using ports 80/443
+
+### DNS-01 Validation Issues
+
+If DNS validation fails:
+1. Verify API key: `echo $HOSTINGER_API_KEY`
+2. Check DNS propagation: `dig _acme-challenge.scrum.strangeindustries.cloud TXT`
+3. Ensure domain is using Hostinger nameservers
+4. Check acme.sh logs: `docker-compose logs acme`
 
 ### WebSocket Connection Issues
 
@@ -177,12 +214,20 @@ docker-compose logs -f
 docker-compose logs -f nginx
 docker-compose logs -f server
 docker-compose logs -f client
-docker-compose logs -f certbot
+docker-compose logs -f acme
 ```
+
+## Advantages of DNS-01 Validation
+
+- **Wildcard certificates**: Can issue certificates for `*.domain.com`
+- **No port 80 required**: Doesn't need HTTP server accessible during validation
+- **Works behind firewalls**: No inbound connections needed for validation
+- **Multiple servers**: Can validate once and deploy to multiple servers
 
 ## Production Checklist
 
-- [ ] Domain DNS configured and propagated
+- [ ] Domain managed by Hostinger DNS
+- [ ] Hostinger API key created and exported
 - [ ] Email added to `init-letsencrypt.sh`
 - [ ] Firewall allows ports 80 and 443
 - [ ] Certificates initialized successfully

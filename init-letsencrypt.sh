@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# This script initializes Let's Encrypt certificates for your domain
+# This script initializes Let's Encrypt certificates for your domain using DNS-01 validation
 # Run this script once before starting docker-compose for the first time
 
 set -e
 
 domain="scrum.strangeindustries.cloud"
-email="" # Add your email address here for certificate expiry notifications
+email="s7r4ng3@gmail.com" # Add your email address here for certificate expiry notifications
 staging=0 # Set to 1 if you're testing your setup to avoid hitting request limits
 
 if [ -z "$email" ]; then
@@ -14,18 +14,23 @@ if [ -z "$email" ]; then
   exit 1
 fi
 
+if [ -z "$HOSTINGER_API_KEY" ]; then
+  echo "Error: HOSTINGER_API_KEY environment variable is not set"
+  echo "Please export your Hostinger API key: export HOSTINGER_API_KEY=your_api_key"
+  exit 1
+fi
+
 echo "### Preparing directories ..."
 mkdir -p ./certbot/conf/live/$domain
-mkdir -p ./certbot/www
 
 echo ""
 echo "### Creating dummy certificate for $domain ..."
-path="/etc/letsencrypt/live/$domain"
+path="/acme.sh/live/$domain"
 docker-compose run --rm --entrypoint "\
   openssl req -x509 -nodes -newkey rsa:2048 -days 1\
     -keyout '$path/privkey.pem' \
     -out '$path/fullchain.pem' \
-    -subj '/CN=localhost'" certbot
+    -subj '/CN=localhost'" acme
 
 echo ""
 echo "### Starting nginx ..."
@@ -34,30 +39,30 @@ docker-compose up --force-recreate -d nginx
 echo ""
 echo "### Deleting dummy certificate for $domain ..."
 docker-compose run --rm --entrypoint "\
-  rm -Rf /etc/letsencrypt/live/$domain && \
-  rm -Rf /etc/letsencrypt/archive/$domain && \
-  rm -Rf /etc/letsencrypt/renewal/$domain.conf" certbot
+  rm -Rf /acme.sh/live/$domain && \
+  rm -Rf /acme.sh/$domain" acme
 
 echo ""
-echo "### Requesting Let's Encrypt certificate for $domain ..."
-
-# Select appropriate email argument
-case "$email" in
-  "") email_arg="--register-unsafely-without-email" ;;
-  *) email_arg="--email $email" ;;
-esac
+echo "### Requesting Let's Encrypt certificate for $domain using DNS-01 validation ..."
 
 # Enable staging mode if needed
 if [ $staging != "0" ]; then staging_arg="--staging"; fi
 
-docker-compose run --rm --entrypoint "\
-  certbot certonly --webroot -w /var/www/certbot \
-    $staging_arg \
-    $email_arg \
-    -d $domain \
-    --rsa-key-size 4096 \
-    --agree-tos \
-    --force-renewal" certbot
+# Issue certificate using Hostinger DNS API
+docker-compose run --rm -e HOSTINGER_API_KEY=$HOSTINGER_API_KEY acme \
+  --issue --dns dns_hostinger \
+  -d $domain \
+  --keylength 4096 \
+  --accountemail $email \
+  $staging_arg
+
+# Install certificate to the nginx-compatible location
+docker-compose run --rm -e HOSTINGER_API_KEY=$HOSTINGER_API_KEY acme \
+  --install-cert -d $domain \
+  --cert-file /acme.sh/live/$domain/cert.pem \
+  --key-file /acme.sh/live/$domain/privkey.pem \
+  --fullchain-file /acme.sh/live/$domain/fullchain.pem \
+  --ca-file /acme.sh/live/$domain/chain.pem
 
 echo ""
 echo "### Reloading nginx ..."
