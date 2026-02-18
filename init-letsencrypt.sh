@@ -26,6 +26,7 @@ docker compose run --rm --entrypoint "\
     -keyout '$path/privkey.pem' \
     -out '$path/fullchain.pem' \
     -subj '/CN=localhost'" certbot
+cp ./certbot/conf/live/$domain/fullchain.pem ./certbot/conf/live/$domain/chain.pem
 
 echo ""
 echo "### Starting nginx ..."
