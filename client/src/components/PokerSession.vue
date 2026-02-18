@@ -156,7 +156,7 @@ export default {
   },
   emits: ['leave-room'],
   setup(props, { emit }) {
-    const cardValues = [1, 3, 5, 8];
+    const cardValues = [1, 2, 3, 5, 8];
     const users = ref([]);
     const votes = ref({});
     const votedUserIds = ref([]);
